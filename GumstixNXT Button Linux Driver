@@ -1,0 +1,236 @@
+/*
+
+A GumstixNXT button driver for a single button using GPIO, loosely based on irqlat by Scott
+Ellis
+
+Sample useage (shell commands):
+insmod button.ko
+echo rd > /dev/button
+*/
+
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <asm/uaccess.h>
+#include <linux/string.h>
+#include <linux/kernel.h>
+#include <linux/device.h>
+#include <linux/gpio.h>
+#include <linux/interrupt.h>
+#include <linux/workqueue.h>
+
+
+/* GPIOs for controlling the individual bits */
+#define GPIO_BIT0 84
+#define GPIO_BIT1 85
+
+/* button device structure */
+struct button_dev {
+  /* Standard fields */
+  dev_t devt; // kernel data structure for device numbers (major,minor)
+  struct cdev cdev; // kernel data structure for character device
+  struct class *class; // kernel data structure for device driver class /sys/class/leddev [LDD Chapter 14]
+  /* Driver-specific fields */
+  int value; // the integer value currently shown, 1 if on, 0 if off
+};
+
+/* device structure instance */
+static struct button_dev button_dev;
+
+/* Reset hardware settings and driver state */
+static void button_reset(void)
+{
+  // Reset driver state
+  button_dev.value = 0;
+}
+
+/* Respond to a command that has been written to the device special file */
+static ssize_t button_write(struct file *filp, const char __user *buff, size_t count, loff_t *f_pos)
+{
+  char cmd[2]; // Buffer for command written by user
+  ssize_t status = 0; // Return status, updated depending on input
+
+  /* Copy the data the user wrote from userspace (how much is read depends on return value) */
+  if (copy_from_user(cmd, buff, 2)) {
+    printk(KERN_ALERT "Error copy_from_user\n");
+    status = -EFAULT;
+    goto button_write_done;
+  }
+    
+  /*
+    Process the command stored in the data
+    'rdb' means read button state
+  */
+  if (cmd[0] == 'r' && cmd[1] == 'd') { // Read command?
+    int value = gpio_get_value(GPIO_BIT0); // Read the hardware bit
+    printk(KERN_ALERT "BTN0 value = %i\n", value);
+
+    value = gpio_get_value(GPIO_BIT1); // Read the hardware bit
+    printk(KERN_ALERT "BTN1 value = %i\n", value);
+
+    status = 2; // Read 2 bytes, update return status correspondingly
+  }
+
+  else { // Unrecognized command
+    status = 1; // Read one byte, will be called again if there is more input
+    if(cmd[0]!=10 && cmd[0]!=' ') // Ignore newline and space
+      printk(KERN_ALERT "Button illegal commands %d\n", cmd[0]);
+  }
+
+ button_write_done:
+
+  return status; // Negative=error, positive=success and indicates #bytes read
+}
+
+/* The file operations structure, operations not listed here are illegal */
+static const struct file_operations button_fops = {
+  .owner = THIS_MODULE,
+  .write = button_write,
+};
+
+/* Initialize the character device structure */
+static int __init button_init_cdev(void)
+{
+  int error;
+
+  /* Initialize devt structure, major/minor numbers assigned afterwards */
+  button_dev.devt = MKDEV(0, 0);
+
+  /* Assign major and minor device numbers to devt structure */
+  error = alloc_chrdev_region(&button_dev.devt, 0, 1, "button");
+  if (error < 0) {
+    printk(KERN_ALERT "alloc_chrdev_region() failed: error = %d \n", error);
+    return -1;
+  }
+
+  /* Initialize character device using the specific file operations structure */
+  cdev_init(&button_dev.cdev, &button_fops);
+  button_dev.cdev.owner = THIS_MODULE;
+
+  /* Request kernel to make one device available */
+  error = cdev_add(&button_dev.cdev, button_dev.devt, 1);
+  if (error) {
+    printk(KERN_ALERT "cdev_add() failed: error = %d\n", error);
+    unregister_chrdev_region(button_dev.devt, 1);
+    return -1;
+  }
+
+  return 0;
+}
+
+/* Create a class for the device driver /sys/class/button [LDD Ch 14] */
+static int __init button_init_class(void)
+{
+  /* Create a class named button */
+  button_dev.class = class_create(THIS_MODULE, "button");
+
+  if (!button_dev.class) {
+    printk(KERN_ALERT "class_create(button) failed\n");
+    return -1;
+  }
+
+  /* Create class representation in the file system */
+  if (!device_create(button_dev.class, NULL, button_dev.devt, NULL, "button")) {
+    class_destroy(button_dev.class);
+    return -1;
+  }
+
+  return 0;
+}
+
+/* Reserve and initialize the GPIO pins needed for the driver */
+static int __init button_init_pins(void)
+{
+  /* Request and configure GPIOs for the button */
+
+  if (gpio_request(GPIO_BIT0, "Bit0")) {
+      printk(KERN_ALERT "gpio_request(0) failed\n");
+      goto init_pins_fail_1;
+  }
+
+  if (gpio_direction_input(GPIO_BIT0)) {
+      printk(KERN_ALERT "gpio_direction_input GPIO_BIT0 failed\n");
+      goto init_pins_fail_1;
+  }
+
+  if (gpio_request(GPIO_BIT1, "Bit1")) {
+      printk(KERN_ALERT "gpio_request(1) failed\n");
+      goto init_pins_fail_2;
+  }
+
+  if (gpio_direction_input(GPIO_BIT1)) {
+      printk(KERN_ALERT "gpio_direction_input GPIO_BIT1 failed\n");
+      goto init_pins_fail_2;
+  }
+
+  return 0;
+
+  /* Error handling code: free in reverse direction */
+ init_pins_fail_2:
+  gpio_free(GPIO_BIT0);
+
+ init_pins_fail_1:
+
+  return -1;
+}
+
+/* Kernel module initialization function */
+static int __init button_init(void)
+{
+  /* Zero memory for device struct */
+  memset(&button_dev, 0, sizeof(button_dev));
+
+  /* Run initialization functions in-turn */
+  if (button_init_cdev())
+    goto init_fail_1;
+
+  if (button_init_class())
+    goto init_fail_2;
+
+  if (button_init_pins() < 0)
+    goto init_fail_3;
+
+  /* Reset driver state */
+  button_reset();
+
+  return 0;
+
+  /* Failure handling: free resources in reverse order (starting at the point we got to) */
+
+ init_fail_3:
+  device_destroy(button_dev.class, button_dev.devt);
+  class_destroy(button_dev.class);
+
+ init_fail_2:
+  cdev_del(&button_dev.cdev);
+  unregister_chrdev_region(button_dev.devt, 1);
+
+ init_fail_1:
+
+  return -1;
+}
+module_init(button_init);
+
+/* Kernel module release function */
+static void __exit button_exit(void)
+{
+  /* Free all GPIOs */
+  gpio_free(GPIO_BIT0);
+  gpio_free(GPIO_BIT1);
+
+  /* Free class device */
+  device_destroy(button_dev.class, button_dev.devt);
+  class_destroy(button_dev.class);
+
+  /* Free device itself */
+  cdev_del(&button_dev.cdev);
+  unregister_chrdev_region(button_dev.devt, 1);
+}
+module_exit(button_exit);
+
+/* Module meta-information */
+MODULE_AUTHOR("Ulrik Pagh Schultz");
+MODULE_DESCRIPTION("A module for reading 2 GumstixNXT buttons");
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_VERSION("0.2");

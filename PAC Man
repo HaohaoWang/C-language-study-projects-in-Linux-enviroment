@@ -1,0 +1,1072 @@
+#include <cyg/kernel/kapi.h>
+#include <cyg/infra/diag.h>
+#include "typedef.h"
+#include "bmp/bmpPastelRainbow.h"
+#include "adc/adc.h"
+#include "lcd/lcd.h"
+#include "pio/pio.h"
+#include "pwmc/pwmc.h"
+#include "hardware.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+
+
+#define TICKS_PER_SECOND         (100)
+
+#define Pac_TASK_STACK_SIZE      (4096)
+#define Pac_TASK_PRIORITY        (10)
+
+#define Ghost_TASK_STACK_SIZE      (4096)
+#define Ghost_TASK_PRIORITY        (10)
+
+#define Ghost_TASK1_STACK_SIZE      (4096)
+#define Ghost_TASK1_PRIORITY        (10)
+
+#define Monitor_TASK_STACK_SIZE      (4096)
+#define Monitor_TASK_PRIORITY        (10)
+
+int8_t PacTaskStack[Pac_TASK_STACK_SIZE];
+cyg_thread pacTaskObj;
+cyg_handle_t pacTaskHdl;
+
+int8_t GhostTaskStack[Ghost_TASK_STACK_SIZE];
+cyg_thread ghostTaskObj;
+cyg_handle_t ghostTaskHdl;
+
+int8_t GhostTaskStack1[Ghost_TASK1_STACK_SIZE];
+cyg_thread ghostTask1Obj;
+cyg_handle_t ghostTask1Hdl;
+
+int8_t MonitorTaskStack[Monitor_TASK_STACK_SIZE];
+cyg_thread monitorTaskObj;
+cyg_handle_t monitorTaskHdl;
+
+cyg_mutex_t lcdMutex;
+
+
+#define COLOR_RED       0
+#define COLOR_YELLOW    1
+#define COLOR_GREEN     2
+int map0[25][27],map[25][27]={
+      {2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,2,2,1,2},
+      {2,1,2,2,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,2,2,1,2},
+      {2,1,1,1,1,1,1,2,2,1,1,1,1,2,1,1,1,1,2,2,1,1,1,1,1,1,2},
+      {2,2,2,2,2,2,1,2,2,2,2,2,0,2,0,2,2,2,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,0,0,0,0,0,0,0,0,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,2,2,2,2,2,2,2,0,2,2,1,2,2,2,2,2,2},
+      {1,1,1,1,1,1,1,0,0,0,2,2,0,0,0,2,2,0,0,0,1,1,1,1,1,1,1},
+      {2,2,2,2,2,2,1,2,2,0,2,2,2,2,2,2,2,0,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,0,0,0,0,0,0,0,0,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,2,2,2,2,2,2,2,0,2,2,1,2,2,2,2,2,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,1,1,2,2,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,2,2,1,1,1,2},
+      {2,2,2,1,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,1,2,2,2},
+      {2,2,2,1,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,1,2,2,2},
+      {2,1,1,1,1,1,1,2,2,1,1,1,1,2,1,1,1,1,2,2,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,2,2,2,2,2,2,1,2,1,2,2,2,2,2,2,2,2,2,2,1,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2}
+
+};
+int   map0[25][27]={
+      {2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,2,2,1,2},
+      {2,1,2,2,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,2,2,1,2},
+      {2,1,1,1,1,1,1,2,2,1,1,1,1,2,1,1,1,1,2,2,1,1,1,1,1,1,2},
+      {2,2,2,2,2,2,1,2,2,2,2,2,0,2,0,2,2,2,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,0,0,0,0,0,0,0,0,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,2,2,2,2,2,2,2,0,2,2,1,2,2,2,2,2,2},
+      {1,1,1,1,1,1,1,0,0,0,2,2,0,0,0,2,2,0,0,0,1,1,1,1,1,1,1},
+      {2,2,2,2,2,2,1,2,2,0,2,2,2,2,2,2,2,0,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,0,0,0,0,0,0,0,0,2,2,1,2,2,2,2,2,2},
+      {2,2,2,2,2,2,1,2,2,0,2,2,2,2,2,2,2,0,2,2,1,2,2,2,2,2,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,2,2,2,2,1,2,2,2,2,2,1,2,1,2,2,2,2,2,1,2,2,2,2,1,2},
+      {2,1,1,1,2,2,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,2,2,1,1,1,2},
+      {2,2,2,1,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,1,2,2,2},
+      {2,2,2,1,2,2,1,2,2,1,2,2,2,2,2,2,2,1,2,2,1,2,2,1,2,2,2},
+      {2,1,1,1,1,1,1,2,2,1,1,1,1,2,1,1,1,1,2,2,1,1,1,1,1,1,2},
+      {2,1,2,2,2,2,2,2,2,2,2,2,1,2,1,2,2,2,2,2,2,2,2,2,2,1,2},
+      {2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2},
+      {2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2}
+
+};
+uint32_t score=0;
+int level=3,life=3;//level1
+int diamond0=0,clock0=0,diamond1=0,clock1=0,ghost0dead=0,ghost1dead=0;//0 means no=ghost is not been eaten
+
+int x=18,y=13;
+char direction='l';//pac man's
+
+int x0=1,y0=1;
+char direction0='r';//Ghost0's
+
+int x1=1,y1=25;
+char direction1='d';//Ghost1's
+
+int x2=18,y2=13;
+int x3=18,y3=13;
+void Paint()
+{  cyg_mutex_lock(&lcdMutex);
+   LCDClearScreen();
+   int m,n;
+   for(m=0;m<=24;m++)
+   {
+      for(n=0;n<=26;n++)
+      {
+         if(map[m][n]==1)
+         LCDSetCircle(m*5, n*5, 1, WHITE);
+         if(map[m][n]==2)
+         LCDSetCircle(m*5, n*5, 1, BLUE);
+      }
+   }
+
+   if(map[7][1]==1){//hongmei
+      LCDSetCircle(7*5, 1*5, 2, GREEN);
+      LCDSetCircle(7*5, 1*5, 1, WHITE);
+   }
+   if(map[21][25]==1){
+      LCDSetCircle(21*5, 25*5, 2, GREEN);// two diamonds
+      LCDSetCircle(21*5, 25*5, 1, WHITE);
+   }
+
+   LCDSetLine(0, 0, 51, 0, BLUE);//the outside walls
+   LCDSetLine(59, 0, 129, 0, BLUE);////left tunnel
+   LCDSetLine(120, 0, 120, 129, BLUE);
+   LCDSetLine(120, 129, 59, 129, BLUE);
+   LCDSetLine(51, 129, 0, 129, BLUE);////right tunnel
+   LCDSetLine(0, 0, 0, 129, BLUE);
+
+   LCDSetRect(9, 9,16,26, NOFILL, BLUE);
+   LCDSetRect(9, 34,16,56, NOFILL, BLUE);
+   LCDSetRect(9, 74,16,96, NOFILL, BLUE);
+   LCDSetRect(9, 104,16,121, NOFILL, BLUE);
+   LCDSetRect(0, 64,16,66, NOFILL, BLUE);
+
+   LCDSetRect(24, 9,31,26, NOFILL, BLUE);
+   LCDSetRect(24, 104,31,121, NOFILL, BLUE);//7 8 blocks
+
+   LCDSetRect(39,0, 51,26, NOFILL, BLUE);//left tunnel 11 12
+   LCDSetRect(59,0, 71,26, NOFILL, BLUE);
+
+   LCDSetRect(39,104, 51,129, NOFILL, BLUE);//right tunnel
+   LCDSetRect(59,104, 71,129, NOFILL, BLUE);
+
+   LCDSetRect(79, 9,86,26, NOFILL, BLUE);
+   LCDSetRect(79, 104,86,121, NOFILL, BLUE);//21 22 blocks
+   LCDSetRect(87, 19,101,26, NOFILL, BLUE);
+   LCDSetRect(87, 104,101,111, NOFILL, BLUE);
+
+   LCDSetRect(79, 34,86,56, NOFILL, BLUE);
+   LCDSetRect(79, 74,86,96, NOFILL, BLUE);//19 20 blocks
+
+   LCDSetRect(59, 34,71,41, NOFILL, BLUE);
+   LCDSetRect(59, 89,71,96, NOFILL, BLUE);//15 16 blocks
+
+   LCDSetRect(24, 34,51,41, NOFILL, BLUE);
+   LCDSetRect(24, 89,51,96, NOFILL, BLUE);//9 10 blocks
+   LCDSetRect(39, 41,41,56, NOFILL, BLUE);
+   LCDSetRect(39, 74,41,89, NOFILL, BLUE);//9 10 blocks
+
+   LCDSetRect(24, 49,31,81, NOFILL, BLUE);//6 blocks
+   LCDSetRect(31, 64,41,66, NOFILL, BLUE);
+
+   LCDSetRect(49, 49,61,81, NOFILL, BLUE);//30 blocks
+   //LCDSetRect(49, 49,61,81, NOFILL, BLUE);//30 blocks
+
+   LCDSetRect(69, 49,71,81, NOFILL, BLUE);//17 blocks
+   LCDSetRect(69, 64,86,66, NOFILL, BLUE);
+
+   LCDSetRect(59, 34,71,41, NOFILL, BLUE);
+   LCDSetRect(59, 89,71,96, NOFILL, BLUE);//15 16 blocks
+
+   LCDSetRect(94, 34,111,41, NOFILL, BLUE);
+   LCDSetRect(94, 89,111,96, NOFILL, BLUE);//25 26 blocks
+   LCDSetRect(109, 9,111,56, NOFILL, BLUE);
+   LCDSetRect(109, 74,111,121, NOFILL, BLUE);
+
+   LCDSetRect(94, 49,101,81, NOFILL, BLUE);//18 blocks
+   LCDSetRect(100, 64,111,66, NOFILL, BLUE);
+
+   LCDSetRect(94, 0,101,11, NOFILL, BLUE);
+   LCDSetRect(94, 119,101,130, NOFILL, BLUE);//23 24 blocks
+   cyg_mutex_unlock(&lcdMutex);
+}
+void Start()
+{
+   LCDSetRect(0, 0,132,132, FILL, BLUE);
+   LCDPutStr("START GAME", 60, 32, SMALL, WHITE, BLUE);//output score on LCD
+   LCDPutStr("YES", 124, 1, SMALL, WHITE, BLUE);//output score on LCD
+}
+void Dead()
+{
+   LCDSetRect(0, 0,132,132, FILL, BLUE);
+   LCDPutStr("TRY AGAIN", 60, 32, SMALL, WHITE, BLUE);//output score on LCD
+}
+void Nextlevel()
+{
+   LCDSetRect(0, 0,132,132, FILL, BLUE);
+   LCDPutStr("NEXT LEVEL", 60, 35, SMALL, WHITE, BLUE);//output score on LCD
+}
+void Youwin()
+{
+   LCDSetRect(0, 0,132,132, FILL, BLUE);
+   LCDPutStr("YOU WIN!", 60, 38, SMALL, WHITE, BLUE);//output score on LCD
+   LCDPutStr("AGAIN", 124, 1, SMALL, WHITE, BLUE);//output score on LCD
+}
+void Gameover()
+{
+   LCDSetRect(0, 0,132,132, FILL, BLUE);
+   LCDPutStr("GAME OVER", 60, 32, SMALL, WHITE, BLUE);//output score on LCD
+   LCDPutStr("AGAIN", 124, 1, SMALL, WHITE, BLUE);//output score on LCD
+}
+void GhostTask(cyg_addrword_t data)
+{
+
+while(1)
+{
+      cyg_thread_delay(TICKS_PER_SECOND/level );//////
+      cyg_mutex_lock(&lcdMutex);
+      switch (direction0) {
+                    case 'r' ://heading right
+                       if((map[x0-1][y0]==2)&&(map[x0+1][y0]==2)){//normal situation
+                          direction0='r';
+                       }
+                       if((map[x0-1][y0]==2)&&(map[x0+1][y0]!=2)){
+                          if(map[x0][y0+1]==2){//heading right and meet the "turn down" corner
+                             direction0='d';}
+                          if(map[x0][y0+1]!=2){//heading right and meet the "T" corner
+                             if(x0<x)//pacman is under the ghost
+                                direction0='d';
+                             else
+                                direction0='r';}
+                       }
+                       if((map[x0-1][y0]!=2)&&(map[x0+1][y0]==2)){
+                          if(map[x0][y0+1]==2){//heading right and meet the "turn down" corner
+                             direction0='u';}
+                          if(map[x0][y0+1]!=2){//heading right and meet the "T" corner
+                             if(x0>x)//pacman is under the ghost
+                                direction0='u';
+                             else
+                                direction0='r';}
+                       }
+                       if((map[x0-1][y0]!=2)&&(map[x0+1][y0]!=2)){
+                          if(map[x0][y0+1]==2){//heading right and meet wall
+                             if(x0<x)
+                                direction0='d';
+                             else
+                                direction0='u';}
+                          if(map[x0][y0+1]!=2){//heading right and meet the "T" corner
+                             if(y0>=y)
+                             {
+                             if(x0<x)
+                                direction0='d';
+                             if(x0>=x)
+                                direction0='u';
+                             }
+                             else
+                                direction0='r';}
+                       }
+
+                      break;
+                    case 'l' ://heading left
+                       if((map[x0-1][y0]==2)&&(map[x0+1][y0]==2)){//normal situation
+                          direction0='l';
+                       }
+                       if((map[x0-1][y0]==2)&&(map[x0+1][y0]!=2)){
+                          if(map[x0][y0-1]==2){//heading left and meet the "turn down" corner
+                             direction0='d';}
+                          if(map[x0][y0-1]!=2){//heading right and meet the "T" corner
+                             if(x0<x)
+                                direction0='d';
+                             else
+                                direction0='l';}
+                       }
+                       if((map[x0-1][y0]!=2)&&(map[x0+1][y0]==2)){
+                          if(map[x0][y0-1]==2){//heading right and meet the "turn down" corner
+                             direction0='u';}
+                          if(map[x0][y0-1]!=2){//heading right and meet the "T" corner
+                             if(x0>x)
+                                direction0='u';
+                             else
+                                direction0='l';}
+                       }
+                       if((map[x0-1][y0]!=2)&&(map[x0+1][y0]!=2)){
+                          if(map[x0][y0-1]==2){//heading right and meet the "turn down" corner
+                             if(x0<=x)
+                                direction0='d';
+                             else
+                                direction0='u';}
+                          if(map[x0][y0-1]!=2){//heading right and meet the "T" corner
+                             if(y0<=y)
+                             {
+                             if(x0<x)
+                                direction0='d';
+                             if(x0>=x)
+                                direction0='u';
+                             }
+                             else
+                                direction0='l';}
+                       }
+
+                      break;
+                    case 'u' ://heading u
+                       if((map[x0][y0-1]==2)&&(map[x0][y0+1]==2)){//normal situation
+                          direction0='u';
+                       }
+                       if((map[x0][y0-1]==2)&&(map[x0][y0+1]!=2)){
+                          if(map[x0-1][y0]==2){//heading up and meet the "turn right" corner
+                             direction0='r';}
+                          if(map[x0-1][y0]!=2){//heading right and meet the "T" corner
+                             if(y0<y)
+                                direction0='r';
+                             else
+                                direction0='u';}
+                       }
+                       if((map[x0][y0-1]!=2)&&(map[x0][y0+1]==2)){
+                          if(map[x0-1][y0]==2){//heading right and meet the "turn down" corner
+                             direction0='l';}
+                          if(map[x0-1][y0]!=2){//heading right and meet the "T" corner
+                             if(y0>y)
+                                direction0='l';
+                             else
+                                direction0='u';}
+                       }
+                       if((map[x0][y0-1]!=2)&&(map[x0][y0+1]!=2)){
+                          if(map[x0-1][y0]==2){//heading right and meet the "turn down" corner
+                             if(y0<y)
+                                direction0='r';
+                             else
+                                direction0='l';}
+                          if(map[x0-1][y0]!=2){//heading right and meet the "T" corner
+                             if(x0<x){
+                             if(y0<=y)
+                                direction0='r';
+                             else
+                                direction0='l';
+                             }
+                             else
+                                direction0='u';}
+                       }
+                      break;
+                    case 'd' ://heading d
+                       if((map[x0][y0-1]==2)&&(map[x0][y0+1]==2)){//normal situation
+                          direction0='d';
+                       }
+                       if((map[x0][y0-1]==2)&&(map[x0][y0+1]!=2)){
+                          if(map[x0+1][y0]==2){//heading up and meet the "turn right" corner
+                             direction0='r';}
+                          if(map[x0+1][y0]!=2){//heading right and meet the "T" corner
+                             if(y0<y)
+                                direction0='r';
+                             else
+                                direction0='d';}
+                       }
+                       if((map[x0][y0-1]!=2)&&(map[x0][y0+1]==2)){
+                          if(map[x0+1][y0]==2){//heading right and meet the "turn down" corner
+                             direction0='l';}
+                          if(map[x0+1][y0]!=2){//heading right and meet the "T" corner
+                             if(y0>y)
+                                direction0='l';
+                             else
+                                direction0='d';}
+                       }
+                       if((map[x0][y0-1]!=2)&&(map[x0][y0+1]!=2)){
+                          if(map[x0+1][y0]==2){//heading right and meet the "turn down" corner
+                             if(y0>y)
+                                direction0='l';
+                             else
+                                direction0='r';}
+                          if(map[x0+1][y0]!=2){//heading right and meet the "T" corner
+                             if(x0>x){
+                             if(y0>=y)
+                                direction0='l';
+                             else
+                                direction0='r';
+                             }
+                             else
+                                direction0='d';}
+                       }
+                      break;
+      }
+
+      switch (direction0) {
+              case 'l' ://heading left
+                 if((x0==11)&&(y0==0)){//meet the cave
+                    y0=26;
+                    LCDSetRect(5*x0-2, 5*0-2,5*x0+2,5*0+2, FILL, BLACK);
+                    if(map[11][0]==1)//this side's dot has not been eaten
+                       LCDSetCircle(5*(11), 5*0, 1, WHITE);
+                    //cyg_thread_delay(TICKS_PER_SECOND/3 );
+                 }
+                 else
+                 if(map[x0][y0-1]!=2){
+                    y0--;}
+
+                 LCDSetRect(5*x0-2, 5*y0-2,5*x0+2,5*y0+2, FILL, BLUE);
+                 LCDSetRect(5*x0-2, 5*(y0+1)-2,5*x0+2,5*(y0+1)+2, FILL, BLACK);
+
+                 if(map[x0][y0+1]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*x0, 5*(y0+1), 1, WHITE);
+                 break;
+              case 'r' ://heading right
+                 if((x0==11)&&(y0==26)){//meet the cave
+                    y0=0;
+                    LCDSetRect(5*x0-2, 5*26-2,5*x0+2,5*26+2, FILL, BLACK);
+                    if(map[11][26]==1)//this side's dot has not been eaten
+                       LCDSetCircle(5*(11), 5*26, 1, WHITE);
+                 }
+                 else
+                 if(map[x0][y0+1]!=2){
+                 y0++;}
+
+                 LCDSetRect(5*x0-2, 5*y0-2,5*x0+2,5*y0+2, FILL, BLUE);
+                 LCDSetRect(5*x0-2, 5*(y0-1)-2,5*x0+2,5*(y0-1)+2, FILL, BLACK);
+                 if(map[x0][y0-1]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*x0, 5*(y0-1), 1, WHITE);
+                 break;
+              case 'u' ://heading up
+                 if((map[x0-1][y0]==1)||(map[x0-1][y0]==0))
+                 x0--;
+                 LCDSetRect(5*x0-2, 5*y0-2,5*x0+2,5*y0+2, FILL, BLUE);
+                 LCDSetRect(5*(x0+1)-2, 5*y0-2,5*(x0+1)+2,5*y0+2, FILL, BLACK);
+                 if(map[x0+1][y0]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*(x0+1), 5*y0, 1, WHITE);
+                 break;
+              case 'd' ://heading down
+                 if((map[x0+1][y0]==1)!=2)
+                 x0++;
+                 LCDSetRect(5*x0-2, 5*y0-2,5*x0+2,5*y0+2, FILL, BLUE);
+                 LCDSetRect(5*(x0-1)-2, 5*y0-2,5*(x0-1)+2,5*y0+2, FILL, BLACK);
+                 if(map[x0-1][y0]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*(x0-1), 5*y0, 1, WHITE);
+                 break;
+
+           }
+            if(map[7][1]==1){//hongmei
+               LCDSetCircle(7*5, 1*5, 2, GREEN);
+               LCDSetCircle(7*5, 1*5, 1, WHITE);
+            }
+            if(map[21][25]==1){
+               LCDSetCircle(21*5, 25*5, 2, GREEN);// two diamonds
+               LCDSetCircle(21*5, 25*5, 1, WHITE);
+            }
+                  cyg_mutex_unlock(&lcdMutex);
+}
+}
+void GhostTask1(cyg_addrword_t data)
+{
+
+while(1)
+{
+      cyg_thread_delay(TICKS_PER_SECOND/level );//////
+      cyg_mutex_lock(&lcdMutex);
+      switch (direction1) {
+                    case 'r' ://heading right
+                       if((map[x1-1][y1]==2)&&(map[x1+1][y1]==2)){//normal situation
+                          direction1='r';
+                       }
+                       if((map[x1-1][y1]==2)&&(map[x1+1][y1]!=2)){
+                          if(map[x1][y1+1]==2){//heading right and meet the "turn down" corner
+                             direction1='d';}
+                          if(map[x1][y1+1]!=2){//heading right and meet the "T" corner
+                             if(x1<x)//pacman is under the ghost
+                                direction1='d';
+                             else
+                                direction1='r';}
+                       }
+                       if((map[x1-1][y1]!=2)&&(map[x1+1][y1]==2)){
+                          if(map[x1][y1+1]==2){//heading right and meet the "turn down" corner
+                             direction1='u';}
+                          if(map[x1][y1+1]!=2){//heading right and meet the "T" corner
+                             if(x1>x)//pacman is under the ghost
+                                direction1='u';
+                             else
+                                direction1='r';}
+                       }
+                       if((map[x1-1][y1]!=2)&&(map[x1+1][y1]!=2)){
+                          if(map[x1][y1+1]==2){//heading right and meet wall
+                             if(x1<x)
+                                direction1='d';
+                             else
+                                direction1='u';}
+                          if(map[x1][y1+1]!=2){//heading right and meet the "T" corner
+                             if(y1>=y)
+                             {
+                             if(x1<x)
+                                direction1='d';
+                             if(x1>=x)
+                                direction1='u';
+                             }
+                             else
+                                direction1='r';}
+                       }
+
+                      break;
+                    case 'l' ://heading left
+                       if((map[x1-1][y1]==2)&&(map[x1+1][y1]==2)){//normal situation
+                          direction1='l';
+                       }
+                       if((map[x1-1][y1]==2)&&(map[x1+1][y1]!=2)){
+                          if(map[x1][y1-1]==2){//heading left and meet the "turn down" corner
+                             direction1='d';}
+                          if(map[x1][y1-1]!=2){//heading right and meet the "T" corner
+                             if(x1<x)
+                                direction1='d';
+                             else
+                                direction1='l';}
+                       }
+                       if((map[x1-1][y1]!=2)&&(map[x1+1][y1]==2)){
+                          if(map[x1][y1-1]==2){//heading right and meet the "turn down" corner
+                             direction1='u';}
+                          if(map[x1][y1-1]!=2){//heading right and meet the "T" corner
+                             if(x1>x)
+                                direction1='u';
+                             else
+                                direction1='l';}
+                       }
+                       if((map[x1-1][y1]!=2)&&(map[x1+1][y1]!=2)){
+                          if(map[x1][y1-1]==2){//heading right and meet the "turn down" corner
+                             if(x1<=x)
+                                direction1='d';
+                             else
+                                direction1='u';}
+                          if(map[x1][y1-1]!=2){//heading right and meet the "T" corner
+                             if(y1<=y)
+                             {
+                             if(x1<x)
+                                direction1='d';
+                             if(x1>=x)
+                                direction1='u';
+                             }
+                             else
+                                direction1='l';}
+                       }
+
+                      break;
+                    case 'u' ://heading u
+                       if((map[x1][y1-1]==2)&&(map[x1][y1+1]==2)){//normal situation
+                          direction1='u';
+                       }
+                       if((map[x1][y1-1]==2)&&(map[x1][y1+1]!=2)){
+                          if(map[x1-1][y1]==2){//heading up and meet the "turn right" corner
+                             direction1='r';}
+                          if(map[x1-1][y1]!=2){//heading right and meet the "T" corner
+                             if(y1<y)
+                                direction1='r';
+                             else
+                                direction1='u';}
+                       }
+                       if((map[x1][y1-1]!=2)&&(map[x1][y1+1]==2)){
+                          if(map[x1-1][y1]==2){//heading right and meet the "turn down" corner
+                             direction1='l';}
+                          if(map[x1-1][y1]!=2){//heading right and meet the "T" corner
+                             if(y1>y)
+                                direction1='l';
+                             else
+                                direction1='u';}
+                       }
+                       if((map[x1][y1-1]!=2)&&(map[x1][y1+1]!=2)){
+                          if(map[x1-1][y1]==2){//heading right and meet the "turn down" corner
+                             if(y1<y)
+                                direction1='r';
+                             else
+                                direction1='l';}
+                          if(map[x1-1][y1]!=2){//heading right and meet the "T" corner
+                             if(x1<x){
+                             if(y1<=y)
+                                direction1='r';
+                             else
+                                direction1='l';
+                             }
+                             else
+                                direction1='u';}
+                       }
+                      break;
+                    case 'd' ://heading d
+                       if((map[x1][y1-1]==2)&&(map[x1][y1+1]==2)){//normal situation
+                          direction1='d';
+                       }
+                       if((map[x1][y1-1]==2)&&(map[x1][y1+1]!=2)){
+                          if(map[x1+1][y1]==2){//heading up and meet the "turn right" corner
+                             direction1='r';}
+                          if(map[x1+1][y1]!=2){//heading right and meet the "T" corner
+                             if(y1<y)
+                                direction1='r';
+                             else
+                                direction1='d';}
+                       }
+                       if((map[x1][y1-1]!=2)&&(map[x1][y1+1]==2)){
+                          if(map[x1+1][y1]==2){//heading right and meet the "turn down" corner
+                             direction1='l';}
+                          if(map[x1+1][y1]!=2){//heading right and meet the "T" corner
+                             if(y1>y)
+                                direction1='l';
+                             else
+                                direction1='d';}
+                       }
+                       if((map[x1][y1-1]!=2)&&(map[x1][y1+1]!=2)){
+                          if(map[x1+1][y1]==2){//heading right and meet the "turn down" corner
+                             if(y1>y)
+                                direction1='l';
+                             else
+                                direction1='r';}
+                          if(map[x1+1][y1]!=2){//heading right and meet the "T" corner
+                             if(x1>x){
+                             if(y1>=y)
+                                direction1='l';
+                             else
+                                direction1='r';
+                             }
+                             else
+                                direction1='d';}
+                       }
+                      break;
+      }
+
+      switch (direction1) {
+              case 'l' ://heading left
+                 if((x1==11)&&(y1==0)){//meet the cave
+                    y1=26;
+                    LCDSetRect(5*x1-2, 5*0-2,5*x1+2,5*0+2, FILL, BLACK);
+                    if(map[11][0]==1)//this side's dot has not been eaten
+                       LCDSetCircle(5*(11), 5*0, 1, WHITE);
+                    //cyg_thread_delay(TICKS_PER_SECOND/3 );
+                 }
+                 else
+                 if(map[x1][y1-1]!=2){
+                 y1--;}
+
+                 LCDSetRect(5*x1-2, 5*y1-2,5*x1+2,5*y1+2, FILL, RED);
+                 LCDSetRect(5*x1-2, 5*(y1+1)-2,5*x1+2,5*(y1+1)+2, FILL, BLACK);
+
+                 if(map[x1][y1+1]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*x1, 5*(y1+1), 1, WHITE);
+                 break;
+              case 'r' ://heading right
+                 if((x1==11)&&(y1==26)){//meet the cave
+                    y1=0;
+                    LCDSetRect(5*x1-2, 5*26-2,5*x1+2,5*26+2, FILL, BLACK);
+                    if(map[11][26]==1)//this side's dot has not been eaten
+                       LCDSetCircle(5*(11), 5*26, 1, WHITE);
+                    //cyg_thread_delay(TICKS_PER_SECOND/3 );
+                 }
+                 else
+                 if(map[x1][y1+1]!=2){
+                 y1++;}
+
+                 LCDSetRect(5*x1-2, 5*y1-2,5*x1+2,5*y1+2, FILL, RED);
+                 LCDSetRect(5*x1-2, 5*(y1-1)-2,5*x1+2,5*(y1-1)+2, FILL, BLACK);
+                 if(map[x1][y1-1]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*x1, 5*(y1-1), 1, WHITE);
+                 break;
+              case 'u' ://heading up
+                 if((map[x1-1][y1]==1)||(map[x1-1][y1]==0))
+                 x1--;
+                 LCDSetRect(5*x1-2, 5*y1-2,5*x1+2,5*y1+2, FILL, RED);
+                 LCDSetRect(5*(x1+1)-2, 5*y1-2,5*(x1+1)+2,5*y1+2, FILL, BLACK);
+                 if(map[x1+1][y1]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*(x1+1), 5*y1, 1, WHITE);
+                 break;
+              case 'd' ://heading down
+                 if((map[x1+1][y1]==1)!=2)
+                 x1++;
+                 LCDSetRect(5*x1-2, 5*y1-2,5*x1+2,5*y1+2, FILL, RED);
+                 LCDSetRect(5*(x1-1)-2, 5*y1-2,5*(x1-1)+2,5*y1+2, FILL, BLACK);
+                 if(map[x1-1][y1]==1)//this potion's dot has not been eaten
+                 LCDSetCircle(5*(x1-1), 5*y1, 1, WHITE);
+                 break;
+           }
+               if(map[7][1]==1){//hongmei
+                  LCDSetCircle(7*5, 1*5, 2, GREEN);
+                  LCDSetCircle(7*5, 1*5, 1, WHITE);
+               }
+               if(map[21][25]==1){
+                  LCDSetCircle(21*5, 25*5, 2, GREEN);// two diamonds
+                  LCDSetCircle(21*5, 25*5, 1, WHITE);
+               }
+                  cyg_mutex_unlock(&lcdMutex);
+}
+}
+void PacTask(cyg_addrword_t data)
+{
+      Paint();
+     // char direction='l';
+
+while(1)
+{
+      static char s[8],s1[8],s2[8];
+      cyg_thread_delay(TICKS_PER_SECOND/level );
+      cyg_mutex_lock(&lcdMutex);
+
+      if ( (!PIO_Get(&joystick_pins[2]))&&((map[x][y+1]==1)||(map[x][y+1]==0)) ) {
+         direction='r';//right
+      }
+      if ( (!PIO_Get(&joystick_pins[1]))&&((map[x+1][y]==1)||(map[x+1][y]==0))) {
+         direction='d';//down
+      }
+      if ( (!PIO_Get(&joystick_pins[3]))&&((map[x][y-1]==1)||(map[x][y-1]==0)) ) {
+         direction='l';//down
+            }
+      if ( (!PIO_Get(&joystick_pins[0]))&&((map[x-1][y]==1)||(map[x-1][y]==0)) ) {
+         direction='u';//down
+            }
+
+      snprintf(s, 8, "%3u", score);//format the "score" turn it to be a string
+      LCDPutStr("SCORE:", 124, 1, SMALL, WHITE, BLACK);//output score on LCD
+      LCDPutStr(s, 124, 30, SMALL, WHITE, BLACK);//output score on LCD
+
+      /*snprintf(s1, 8, "%3u", life);//format the "life" turn it to be a string
+      LCDPutStr("L:", 124, 70, SMALL, WHITE, BLACK);//output life on LCD
+      LCDPutStr(s1, 124, 75, SMALL, WHITE, BLACK);//output life on LCD*/
+
+      snprintf(s2, 8, "%3u", level/3);//format the "level" turn it to be a string
+      LCDPutStr("L:", 124, 106, SMALL, WHITE, BLACK);//output level on LCD
+      LCDPutStr(s2, 124, 110, SMALL, WHITE, BLACK);//output level on LCD
+
+      switch (direction) {
+         case 'l' ://heading left
+            if((x==11)&&(y==0)){
+               y=26;
+               LCDSetCircle(5*x, 5*0, 2, BLACK);
+               LCDSetCircle(5*x, 5*0, 1, BLACK);
+               //cyg_thread_delay(TICKS_PER_SECOND/3 );
+            }
+            else
+            if((map[x][y-1]==1)||(map[x][y-1]==0)){
+            y--;}
+            LCDSetCircle(5*x, 5*y, 2, YELLOW);
+            LCDSetCircle(5*x, 5*(y+1), 2, BLACK);
+            LCDSetCircle(5*x, 5*(y), 1, BLACK);
+            break;
+         case 'r' ://heading right
+            if((x==11)&&(y==26)){
+               y=0;
+               LCDSetCircle(5*x, 5*26, 2, BLACK);
+               LCDSetCircle(5*x, 5*26, 1, BLACK);
+               //cyg_thread_delay(TICKS_PER_SECOND/3 );
+            }
+            else
+            if((map[x][y+1]==1)||(map[x][y+1]==0)){
+            y++;}
+
+            LCDSetCircle(5*x, 5*y, 2, YELLOW);
+            LCDSetCircle(5*x, 5*(y-1), 2, BLACK);
+            LCDSetCircle(5*x, 5*(y), 1, BLACK);
+            break;
+         case 'u' ://heading up
+            if((map[x-1][y]==1)||(map[x-1][y]==0))
+            x--;
+            LCDSetCircle(5*x, 5*y, 2, YELLOW);
+            LCDSetCircle(5*(x+1), 5*y, 2, BLACK);
+            LCDSetCircle(5*(x), 5*y, 1, BLACK);
+            break;
+         case 'd' ://heading down
+            if((map[x+1][y]==1)||(map[x+1][y]==0))
+            x++;
+            LCDSetCircle(5*x, 5*y, 2, YELLOW);
+            LCDSetCircle(5*(x-1), 5*y, 2, BLACK);
+            LCDSetCircle(5*(x), 5*y, 1, BLACK);
+            break;
+      }
+
+      cyg_mutex_unlock(&lcdMutex);
+      diag_printf("x y::%d,%d\n",x,y);
+      diag_printf("x0 y0:%d,%d\n",x0,y0);
+      diag_printf("x1 y1:%d,%d\n",x1,y1);
+
+      if(diamond0==1){
+         clock0++;
+         diag_printf("CLOCK0:%d OOOOOOOOOOOOOOOOOOOOOOO\n",clock0);
+      }
+
+      if(diamond1==1){
+         clock1++;
+         diag_printf("CLOCK1:%d OOOOOOOOOOOOOOOOOOOOOOO\n",clock0);
+      }
+
+      //control the two ghosts not to hit eache other.
+      if(((abs(x0-x1)==2)&&(y0==y1)&&(map[(x0+x1)/2][(y0+y1)/2]!=2))||((abs(y0-y1)==2)&&(x0==x1)&&(map[(x0+x1)/2][(y0+y1)/2]!=2))){
+      char temp0,temp1;
+         temp0=direction0;
+         temp1=direction1;
+         direction1=temp0;
+         direction0=temp1;
+         diag_printf("Monitor is working 1 &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n");//!!! wo fu le!wocao!
+      }
+      if((x0==x1)&&(y0==y1)){//just in case .make sure two ghosts never be together
+         direction1='r';
+         direction0='u';
+         diag_printf("Monitor is working ****************************\n");//!!!
+      }
+}
+}
+void MonitorTask(cyg_addrword_t data){
+   static char s[8],s1[8];
+   while(1){
+      if(map[x][y]==1){//dots and diamonds
+               map[x][y]=0;
+               score=score+1;
+
+               PWMC_EnableChannel(AUDIO_OUT_CHANNEL);//dot's sound!
+               AT91C_BASE_PWMC->PWMC_CH[AUDIO_OUT_CHANNEL].PWMC_CPRDR = 14000;
+               AT91C_BASE_PWMC->PWMC_CH[AUDIO_OUT_CHANNEL].PWMC_CDTYR = 14000 >> 1;//output audio
+
+               snprintf(s, 8, "%3u", score);//format the "score" turn it to be a string
+               LCDPutStr("SCORE:", 124, 1, SMALL, WHITE, BLACK);//output score on LCD
+               LCDPutStr(s, 124, 30, SMALL, WHITE, BLACK);//output score on LCD
+               PWMC_DisableChannel(AUDIO_OUT_CHANNEL);
+      }
+
+
+      if((x==7)&&(y==1)){
+            diamond0=1;//active clock0 located in pacman thread
+            diag_printf("diamond0:%d OOOOOOOOOOOOOOOOOOOOOOO\n",diamond0);
+      }
+      if((x==21)&&(y==25)){
+            diamond1=1;//active clock1 located in pacman thread
+            diag_printf("diamond0:%d OOOOOOOOOOOOOOOOOOOOOOO\n",diamond0);
+      }
+
+      if(((clock0>=1)&&(clock0<=20))||((clock1>=1)&&(clock1<=20))){//pac man eat a diamond ,whatever the d0 or d1
+         if(((abs(x0-x)<=1)&&(y0==y))||((abs(y0-y)<=1)&&(x0==x))){//pac man eat the ghost0 blue
+            cyg_thread_suspend(ghostTaskHdl);//kill ghost0 for a moment
+            if(map[x0][y0]==1){
+               LCDSetRect(5*x0-2, 5*y0-2,5*x0+2,5*y0+2, FILL, BLACK);
+               LCDSetCircle(x0*5, y0*5, 1, WHITE);
+            }
+            if(map[x0][y0]==0){
+               LCDSetRect(5*x0-2, 5*y0-2,5*x0+2,5*y0+2, FILL, BLACK);
+            }
+            ghost0dead=1;//ghost0 is dead now =a flag.
+            PWMC_EnableChannel(AUDIO_OUT_CHANNEL);//diamond's sound!
+            AT91C_BASE_PWMC->PWMC_CH[AUDIO_OUT_CHANNEL].PWMC_CPRDR = 80000;
+            AT91C_BASE_PWMC->PWMC_CH[AUDIO_OUT_CHANNEL].PWMC_CDTYR = 80000 >> 1;//output audio
+            PWMC_DisableChannel(AUDIO_OUT_CHANNEL);
+         }
+        if(((abs(x1-x)<=1)&&(y1==y))||((abs(y1-y)<=1)&&(x1==x))){//pac man eat the ghost1 red
+            cyg_thread_suspend(ghostTask1Hdl);//kill ghost0 for a moment
+            if(map[x1][y1]==1){
+               LCDSetRect(5*x1-2, 5*y1-2,5*x1+2,5*y1+2, FILL, BLACK);
+               LCDSetCircle(x1*5, y1*5, 1, WHITE);
+            }
+            if(map[x1][y1]==0){
+               LCDSetRect(5*x1-2, 5*y1-2,5*x1+2,5*y1+2, FILL, BLACK);
+            }
+            ghost1dead=1;//ghost0 is dead now =a flag.
+            PWMC_EnableChannel(AUDIO_OUT_CHANNEL);//diamond's sound!
+            AT91C_BASE_PWMC->PWMC_CH[AUDIO_OUT_CHANNEL].PWMC_CPRDR = 80000;
+            AT91C_BASE_PWMC->PWMC_CH[AUDIO_OUT_CHANNEL].PWMC_CDTYR = 80000 >> 1;//output audio
+            PWMC_DisableChannel(AUDIO_OUT_CHANNEL);
+         }
+         diag_printf("diamond0:%d WWWWWWWWWWWWWWWWWWWWWWWWWWW\n",diamond0);
+
+         if(((clock0>=1)&&(clock0<=20))){
+         cyg_mutex_lock(&lcdMutex);
+         snprintf(s1, 8, "%3u", 20-clock0);//format the "time" turn it to be a string
+         LCDPutStr("T:", 124, 70, SMALL, WHITE, BLACK);//output time0 on LCD
+         LCDPutStr(s1, 124, 75, SMALL, WHITE, BLACK);//output time0 on LCD*/
+         cyg_mutex_unlock(&lcdMutex);
+         }
+         if(((clock1>=1)&&(clock1<=20))){
+         cyg_mutex_lock(&lcdMutex);
+         snprintf(s1, 8, "%3u", 20-clock1);//format the "time" turn it to be a string
+         LCDPutStr("T:", 124, 70, SMALL, WHITE, BLACK);//output time1 on LCD
+         LCDPutStr(s1, 124, 75, SMALL, WHITE, BLACK);//output time1 on LCD*/
+         cyg_mutex_unlock(&lcdMutex);
+         }
+      }
+
+      if(((clock0==21)&&(ghost0dead==1))||((clock1==21)&&(ghost0dead==1))){//some seconds after resume ghost0.
+      x0=9;y0=12;
+      direction0='l';
+      cyg_thread_resume(ghostTaskHdl);
+      }
+      if(((clock0==21)&&(ghost1dead==1))||((clock1==21)&&(ghost1dead==1))){//some seconds after resume ghost2.
+      x1=9;y1=16;
+      direction1='r';
+      cyg_thread_resume(ghostTask1Hdl);
+      }
+
+      if(((clock0==0)||(clock0>=22))&&((clock1==0)||(clock1>=22))){
+   if(((abs(x0-x)<=1)&&(y0==y))||((abs(y0-y)<=1)&&(x0==x))||((abs(y1-y)<=1)&&(x1==x))||((abs(x1-x)<=1)&&(y1==y))){//pac man been eaten part
+            cyg_thread_suspend(pacTaskHdl);
+            cyg_thread_suspend(ghostTaskHdl);
+            cyg_thread_suspend(ghostTask1Hdl);
+            life--;
+            diag_printf("Monitor is working ^^^^^^^^^^^^^^^^^^^^^^\n");//!!!
+            Gameover();
+            diamond0=0;//reset the 3 parameters
+            clock0=0;
+            ghost0dead=0;
+            diamond1=0;//reset the 3 parameters
+            clock1=0;
+            ghost1dead=0;
+            while(1){
+            if ( !PIO_Get(&switch_pins[SWITCH1]) ) {
+               break;
+            }}
+            diag_printf("you game over {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n");
+            level=3;
+            score=0;
+            int m,n;
+            for(m=0;m<=24;m++){//give the 0 1 2 values to the matrix map again
+                for(n=0;n<=26;n++)
+                {
+                map[m][n]=map0[m][n];
+                }
+            }
+            x=18;
+            y=13;
+            direction='l';
+            x0=1;y0=1;
+            x1=1;y1=25;
+            Paint();
+            cyg_thread_resume(pacTaskHdl);
+            cyg_thread_resume(ghostTaskHdl);
+            cyg_thread_resume(ghostTask1Hdl);
+         }
+      }
+         if(score==70){//you win and next level part
+            cyg_thread_suspend(pacTaskHdl);
+            cyg_thread_suspend(ghostTaskHdl);
+            cyg_thread_suspend(ghostTask1Hdl);
+            //cyg_thread_suspend(monitorTaskHdl);
+            level=level+3;
+            if(level!=12){
+            Nextlevel();
+            diamond0=0;
+            clock0=0;
+            ghost0dead=0;
+            diamond1=0;//reset the 3 parameters
+            clock1=0;
+            ghost1dead=0;
+            score=0;
+
+            cyg_thread_delay(TICKS_PER_SECOND*3 );
+            //show level/2
+            int m,n;
+            for(m=0;m<=24;m++){//give the 0 1 2 values to the matrix map again
+                  for(n=0;n<=26;n++)
+                  {
+                     map[m][n]=map0[m][n];
+                  }
+               }
+            x=18;
+            y=13;
+            direction='l';
+            x0=1;y0=1;
+            x1=1;y1=25;
+            Paint();
+            cyg_thread_resume(pacTaskHdl);
+            cyg_thread_resume(ghostTaskHdl);
+            cyg_thread_resume(ghostTask1Hdl);
+            }
+            if(level==12){//you make it through,all 3 levels
+                     Youwin();
+                     diamond0=0;
+                     clock0=0;
+                     ghost0dead=0;
+                     diamond1=0;//reset the 3 parameters
+                     clock1=0;
+                     ghost1dead=0;
+                     level=3;
+                     score=0;
+                     //cyg_thread_delay(TICKS_PER_SECOND*3 );
+                     while(1){
+                     if ( !PIO_Get(&switch_pins[SWITCH1]) ) {
+                        break;
+                     }}
+                     diag_printf("you win {}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}\n");
+
+                     int m,n;
+                     for(m=0;m<=24;m++){//give the 0 1 2 values to the matrix map again
+                           for(n=0;n<=26;n++)
+                           {
+                              map[m][n]=map0[m][n];
+                           }
+                        }
+                     x=18;
+                     y=13;
+                     direction='l';
+                     x0=1;y0=1;
+                     x1=1;y1=25;
+                     Paint();
+                     cyg_thread_resume(pacTaskHdl);
+                     cyg_thread_resume(ghostTaskHdl);
+                     cyg_thread_resume(ghostTask1Hdl);
+             }
+         }
+   }
+}
+
+void cyg_user_start(void)
+{
+   hardwareInit();
+   cyg_mutex_init(&lcdMutex);
+
+   Start();   //the start screen
+   while(1){
+   if ( !PIO_Get(&switch_pins[SWITCH1]) ) {
+      break;
+   }}
+
+   cyg_thread_create(Pac_TASK_PRIORITY,
+                   PacTask,
+                   (cyg_addrword_t)0,
+                   "PAC Task",
+                   (void *)PacTaskStack,
+                   Pac_TASK_STACK_SIZE,
+                   &pacTaskHdl,
+                   &pacTaskObj);
+
+   cyg_thread_create(Monitor_TASK_PRIORITY,
+                   MonitorTask,
+                   (cyg_addrword_t)0,
+                   "MONITOR Task",
+                   (void *)MonitorTaskStack,
+                   Monitor_TASK_STACK_SIZE,
+                   &monitorTaskHdl,
+                   &monitorTaskObj);
+
+  cyg_thread_create(Ghost_TASK_PRIORITY,
+                   GhostTask,
+                   (cyg_addrword_t)0,
+                   "GHOST Task",
+                   (void *)GhostTaskStack,
+                   Ghost_TASK_STACK_SIZE,
+                   &ghostTaskHdl,
+                   &ghostTaskObj);
+
+  cyg_thread_create(Ghost_TASK1_PRIORITY,
+                   GhostTask1,
+                   (cyg_addrword_t)0,
+                   "GHOST1 Task",
+                   (void *)GhostTaskStack1,
+                   Ghost_TASK1_STACK_SIZE,
+                   &ghostTask1Hdl,
+                   &ghostTask1Obj);
+
+  cyg_thread_resume(pacTaskHdl);
+  cyg_thread_resume(ghostTaskHdl);
+  cyg_thread_resume(ghostTask1Hdl);
+  cyg_thread_resume(monitorTaskHdl);
+
+   diag_printf("eCos extra example :-)\n");
+}
+

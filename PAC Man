@@ -12,8 +12,8 @@
 #include <stdlib.h>
 #include <time.h>
 
-// copyight mhw
-// First branch mhw hahahaha
+// copyight ming
+ 
 
 
 #define TICKS_PER_SECOND         (100)
